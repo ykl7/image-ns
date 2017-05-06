@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+
 import scipy.io
 
 VGG19_LAYERS = (
@@ -29,3 +30,30 @@ def normalize(image, mean_pixel):
 
 def retrieve_original(image, mean_pixel):
     return image + mean_pixel
+
+def _pooling_layer(input, pooling):
+    if pooling == 'avg':
+        return tf.nn.avg_pool(input, ksize=(1, 2, 2, 1), strides=(1, 2, 2, 1), padding='SAME')
+    else:
+        return tf.nn.max_pool(input, ksize=(1, 2, 2, 1), strides=(1, 2, 2, 1), padding='SAME')
+
+def preloaded_network(weights, input_image, pooling):
+    vggnet = {}
+    current_image = input_image
+    for i, name in enumerate(VGG19_LAYERS):
+        # first 4 letters are constant in layer name so it can be used to check type
+        layer_type = name[:4]
+        if layer_type == 'conv':
+            # weights as tuple of height, weight, in_channels, out_channels
+            kernels, bias = weights[i][0][0][0][0]
+            kernels = np.transpose(kernels, (1, 0, 2, 3))
+            bias = bias.reshape(-1)
+            current_image = _convolution_layer(current_image, kernels, bias)
+        elif layer_type == 'relu':
+            current_image = tf.nn.relu(current_image)
+        elif layer_type == 'pool':
+            current_image = _pooling_layer(current_image, pooling)
+        vggnet[name] = current_image
+
+    assert len(vggnet) == len(VGG19_LAYERS)
+    return vggnet
