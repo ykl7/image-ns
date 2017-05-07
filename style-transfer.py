@@ -22,10 +22,24 @@ def grayscale2rgb(grayscale):
 def _calc_tensor_size(tensor):
     return reduce(mul, (dim.value for dim in tensor.get_shape()), 1)
 
-def style_transfer(neural_net, content, styles):
+def style_transfer(neural_net, content, styles, style_layer_weight_exponent):
 	overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
     content_features = {}
     style_features = [{} for _ in styles]
 
     vgg_network_weights, vgg_network_mean_pixel = vgg.load_network(neural_net)
+
+    # layers weighted and normalised
+
+    layer_weight = 1.0
+    weights_of_style_layers = {}
+    for layer in STYLE_LAYERS:
+        weights_of_style_layers[layer] = layer_weight
+        layer_weight *= style_layer_weight_exponent
+
+    sum_of_layer_weights = 0
+    for layer in STYLE_LAYERS:
+        sum_of_layer_weights += weights_of_style_layers[layer]
+    for layer in STYLE_LAYERS:
+        weights_of_style_layers[layer] /= sum_of_layer_weights
