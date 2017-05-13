@@ -22,13 +22,13 @@ def grayscale2rgb(grayscale):
 def _calc_tensor_size(tensor):
     return reduce(mul, (dim.value for dim in tensor.get_shape()), 1)
 
-def style_transfer(neural_net, content, styles, style_layer_weight_exponent):
+def style_transfer(neural_net, content, styles, style_layer_weight_exponent, pooling):
 	overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
     content_features = {}
     style_features = [{} for _ in styles]
 
-    vgg_network_weights, vgg_network_mean_pixel = vgg.load_network(neural_net)
+    vgg_network_weights, vgg_network_mean_pixel = vggnet.load_network(neural_net)
 
     # layers weighted and normalised
 
@@ -43,3 +43,14 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent):
         sum_of_layer_weights += weights_of_style_layers[layer]
     for layer in STYLE_LAYERS:
         weights_of_style_layers[layer] /= sum_of_layer_weights
+
+
+    # feedforward computation of content features for CPU
+
+    feedforward_content_graph = tf.Graph()
+    with feedforward_content_graph.as_default(), feedforward_content_graph.device('/cpu:0'), tf.Session():
+        image = tf.placeholder('float', shape=overall_shape)
+        network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
+        preprocessed_content = np.array([vggnet.normalize(content, vgg_network_mean_pixel)])
+        for layer in CONTENT_LAYERS:
+            content_features[layer] = network[layer].eval(feed_dict={image: preprocessed_content})
