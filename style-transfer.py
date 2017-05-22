@@ -54,3 +54,17 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
         preprocessed_content = np.array([vggnet.normalize(content, vgg_network_mean_pixel)])
         for layer in CONTENT_LAYERS:
             content_features[layer] = network[layer].eval(feed_dict={image: preprocessed_content})
+
+    # feedforward computation of style features for CPU
+
+    for i in range(len(styles)):
+        feedforward_style_graph = tf.Graph()
+        with feedforward_style_graph.as_default(), feedforward_style_graph.device('/cpu:0'), tf.Session():
+            image = tf.placeholder('float', shape=style_shapes[i])
+            network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
+            preprocessed_styles = np.array([vggnet.normalize(styles[i], vgg_network_mean_pixel)])
+            for layer in STYLE_LAYERS:
+                features = network[layer].eval(feed_dict={image: preprocessed_styles})
+                features = np.reshape(features, (-1, features.shape[3]))
+                gram_matrix = np.matmul(features.T, features) / features.size
+                style_features[i][layer] = gram_matrix
