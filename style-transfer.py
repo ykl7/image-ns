@@ -22,7 +22,7 @@ def grayscale2rgb(grayscale):
 def _calc_tensor_size(tensor):
     return reduce(mul, (dim.value for dim in tensor.get_shape()), 1)
 
-def style_transfer(neural_net, content, styles, style_layer_weight_exponent, pooling):
+def style_transfer(neural_net, content, styles, style_layer_weight_exponent, pooling, initial, initial_noiseblend):
 	overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
     content_features = {}
@@ -68,3 +68,19 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
                 features = np.reshape(features, (-1, features.shape[3]))
                 gram_matrix = np.matmul(features.T, features) / features.size
                 style_features[i][layer] = gram_matrix
+
+    initial_content_noise_coeff = 1.0 - initial_noiseblend
+
+    # make stylized image using backpropogation
+    
+    with tf.Graph().as_default():
+        if initial is None:
+            noise = np.random.normal(size=shape, scale=np.std(content) * 0.1)
+            initial = tf.random_normal(shape) * 0.256
+        else:
+            initial = np.array([vggnet.normalize(initial, vgg_network_mean_pixel)])
+            initial = initial.astype('float32')
+            noise = np.random.normal(size=shape, scale=np.std(content) * 0.1)
+            initial = (initial) * initial_content_noise_coeff + (tf.random_normal(shape) * 0.256) * (1.0 - initial_content_noise_coeff)
+        image = tf.Variable(initial)
+        net = vggnet.preloaded_network(vgg_network_weights, image, pooling)
