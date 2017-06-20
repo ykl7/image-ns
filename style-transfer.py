@@ -23,7 +23,8 @@ def _calc_tensor_size(tensor):
     return reduce(mul, (dim.value for dim in tensor.get_shape()), 1)
 
 def style_transfer(neural_net, content, styles, style_layer_weight_exponent, pooling, initial, initial_noiseblend,
-    content_weight, content_weight_blend, style_blend_weights, style_weight):
+    content_weight, content_weight_blend, style_blend_weights, style_weight, total_variation_weight, learning_rate,
+    beta1, beta2, epsilon):
 
 	overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
@@ -114,3 +115,24 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
                 style_gram = style_features[i][style_layer]
                 style_losses.append(style_layers_weights[style_layer] * 2 * tf.nn.l2_loss(gram - style_gram) / style_gram.size)
             style_loss += style_weight * style_blend_weights[i] * reduce(tf.add, all_style_losses)
+
+        # denoising the total variation
+
+        total_variation_y_size = _calc_tensor_size(image[:,1:,:,:])
+        total_variation_x_size = _calc_tensor_size(image[:,:,1:,:])
+        total_variation_loss = total_variation_weight * 2 * ((tf.nn.l2_loss(image[:,1:,:,:] - image[:,:shape[1]-1,:,:]) / total_variation_y_size) +
+                (tf.nn.l2_loss(image[:,:,1:,:] - image[:,:,:shape[2]-1,:]) / total_variation_x_size))
+
+        overall_loss = content_loss + style_loss + total_variation_loss
+
+        # Optimizer setup
+
+        train_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(loss)
+
+        def progress_statistics():
+            stderr.write('content loss: %g\n' % content_loss.eval())
+            stderr.write('style loss: %g\n' % style_loss.eval())
+            stderr.write('total variation loss: %g\n' % total_variation_loss.eval())
+            stderr.write('total loss: %g\n' % overall_loss.eval())
+
+
