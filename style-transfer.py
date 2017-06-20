@@ -24,7 +24,7 @@ def _calc_tensor_size(tensor):
 
 def style_transfer(neural_net, content, styles, style_layer_weight_exponent, pooling, initial, initial_noiseblend,
     content_weight, content_weight_blend, style_blend_weights, style_weight, total_variation_weight, learning_rate,
-    beta1, beta2, epsilon):
+    beta1, beta2, epsilon, preserve_colors, no_of_iterations, print_iterations=None, checkpoint_iterations=None):
 
 	overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
@@ -127,12 +127,65 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
 
         # Optimizer setup
 
-        train_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(loss)
+        training_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(loss)
 
         def progress_statistics():
             stderr.write('content loss: %g\n' % content_loss.eval())
             stderr.write('style loss: %g\n' % style_loss.eval())
             stderr.write('total variation loss: %g\n' % total_variation_loss.eval())
             stderr.write('total loss: %g\n' % overall_loss.eval())
+
+        # Optimization
+
+        best_loss = float('inf')
+        best = None
+        with tf.Session() as session:
+            session.run(tf.global_variables_initializer())
+            stderr.write('Optimization start\n')
+            if (print_iterations and print_iterations != 0):
+                progress_statistics()
+            for i in range(no_of_iterations):
+                stderr.write('Iteration %4d/%4d\n' % (i+1, no_of_iterations))
+                training_step.run()
+
+                previous_training_step = (i == no_of_iterations-1)
+                if previous_training_step or (print_iterations and i%print_iterations == 0):
+                    progress_statistics()
+                if (checkpoint_iterations and i%checkpoint_iterations == 0) or previous_training_step:
+                    present_loss = overall_loss.eval()
+                    if present_loss < best_loss:
+                        best_loss = present_loss
+                        best = image.eval()
+                    output_image = vggnet.retrieve_original(best.reshape(shape[1:]), vgg_network_mean_pixel)
+
+                    if preserve_colors and preserve_colors == True:
+                        original_image = np.clip(content, 0, 255)
+                        styled_image = np.clip(output_image, 0, 255)
+
+                    # Luminosity transfer steps
+
+                    # Rec.601 luma (0.299, 0.587, 0.114) conversion of stylized RGB to stylized grayscale
+                    styled_grayscale = rgb2grayscale(styled_image)
+                    styled_grayscale_rgb = grayscale2rgb(styled_grayscale)
+
+                    # Stylized grayscale to YUV (YCbCr) conversion
+                    styled_grayscale_yuv = np.array(Image.fromarray(styled_grayscale_rgb.astype(np.uint8)).convert('YCbCr'))
+
+                    # Original image to YUV (YCbCr) conversion
+                    original_yuv = np.array(Image.fromarray(original_image.astype(np.uint8)).convert('YCbCr'))
+
+                    # Recombine (stylizedYUV.Y, originalYUV.U, originalYUV.V)
+                    w, h, _ = original_image.shape
+                    combined_yuv = np.empty((w, h, 3), dtype=np.uint8)
+                    combined_yuv[..., 0] = styled_grayscale_yuv[..., 0]
+                    combined_yuv[..., 1] = original_yuv[..., 1]
+                    combined_yuv[..., 2] = original_yuv[..., 2]
+
+                    # Recombined YUV image back to RGB
+                    output_image = np.array(Image.fromarray(combined_yuv, 'YCbCr').convert('RGB'))
+
+                yield ((None if last_step else i), output_image)
+
+
 
 
