@@ -26,7 +26,7 @@ NO_OF_ITERATIONS = 1000
 
 POOLING = 'max'
 
-def save_image(path, img):
+def save_image(path, image):
     image = np.clip(image, 0, 255).astype(np.uint8)
     Image.fromarray(image).save(path, quality=95)
 
