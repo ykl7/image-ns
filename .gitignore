@@ -1,4 +1,4 @@
 *.mat
 *.pyc
-exmaples/
+examples/
 .DS_Store
