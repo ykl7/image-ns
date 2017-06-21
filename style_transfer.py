@@ -26,7 +26,7 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
     content_weight, content_weight_blend, style_blend_weights, style_weight, total_variation_weight, learning_rate,
     beta1, beta2, epsilon, preserve_colors, no_of_iterations, print_iterations=None, checkpoint_iterations=None):
 
-	overall_shape = (1,) + content.shape
+    overall_shape = (1,) + content.shape
     per_style_shape = [(1,) + style.shape for style in styles]
     content_features = {}
     style_features = [{} for _ in styles]
@@ -51,7 +51,10 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
     # feedforward computation of content features for CPU
 
     feedforward_content_graph = tf.Graph()
-    with feedforward_content_graph.as_default(), feedforward_content_graph.device('/cpu:0'), tf.Session():
+    # CPU usage for tensorflow for local
+    # with feedforward_content_graph.as_default(), feedforward_content_graph.device('/cpu:0'), tf.Session():
+    # GPU usage for tensorflow for server deployment
+    with feedforward_content_graph.as_default(), feedforward_content_graph.device('/gpu:0'), tf.Session():
         image = tf.placeholder('float', shape=overall_shape)
         network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
         preprocessed_content = np.array([vggnet.normalize(content, vgg_network_mean_pixel)])
@@ -62,7 +65,10 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
 
     for i in range(len(styles)):
         feedforward_style_graph = tf.Graph()
-        with feedforward_style_graph.as_default(), feedforward_style_graph.device('/cpu:0'), tf.Session():
+        # CPU usage for tensorflow for local
+        # with feedforward_style_graph.as_default(), feedforward_style_graph.device('/cpu:0'), tf.Session():
+        # GPU usage for tensorflow for server deployment
+        with feedforward_style_graph.as_default(), feedforward_style_graph.device('/gpu:0'), tf.Session():
             image = tf.placeholder('float', shape=style_shapes[i])
             network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
             preprocessed_styles = np.array([vggnet.normalize(styles[i], vgg_network_mean_pixel)])
