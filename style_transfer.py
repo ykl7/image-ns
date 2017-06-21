@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 from functools import reduce
 from operator import mul
+from sys import stderr
 
 import vggnet
 
@@ -52,9 +53,7 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
 
     feedforward_content_graph = tf.Graph()
     # CPU usage for tensorflow for local
-    # with feedforward_content_graph.as_default(), feedforward_content_graph.device('/cpu:0'), tf.Session():
-    # GPU usage for tensorflow for server deployment
-    with feedforward_content_graph.as_default(), feedforward_content_graph.device('/gpu:0'), tf.Session():
+    with feedforward_content_graph.as_default(), feedforward_content_graph.device('/cpu:0'), tf.Session():
         image = tf.placeholder('float', shape=overall_shape)
         network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
         preprocessed_content = np.array([vggnet.normalize(content, vgg_network_mean_pixel)])
@@ -66,10 +65,8 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
     for i in range(len(styles)):
         feedforward_style_graph = tf.Graph()
         # CPU usage for tensorflow for local
-        # with feedforward_style_graph.as_default(), feedforward_style_graph.device('/cpu:0'), tf.Session():
-        # GPU usage for tensorflow for server deployment
-        with feedforward_style_graph.as_default(), feedforward_style_graph.device('/gpu:0'), tf.Session():
-            image = tf.placeholder('float', shape=style_shapes[i])
+        with feedforward_style_graph.as_default(), feedforward_style_graph.device('/cpu:0'), tf.Session():
+            image = tf.placeholder('float', shape=per_style_shape[i])
             network = vggnet.preloaded_network(vgg_network_weights, image, pooling)
             preprocessed_styles = np.array([vggnet.normalize(styles[i], vgg_network_mean_pixel)])
             for layer in STYLE_LAYERS:
@@ -84,13 +81,13 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
     
     with tf.Graph().as_default():
         if initial is None:
-            noise = np.random.normal(size=shape, scale=np.std(content) * 0.1)
-            initial = tf.random_normal(shape) * 0.256
+            noise = np.random.normal(size=overall_shape, scale=np.std(content) * 0.1)
+            initial = tf.random_normal(overall_shape) * 0.256
         else:
             initial = np.array([vggnet.normalize(initial, vgg_network_mean_pixel)])
             initial = initial.astype('float32')
-            noise = np.random.normal(size=shape, scale=np.std(content) * 0.1)
-            initial = (initial) * initial_content_noise_coeff + (tf.random_normal(shape) * 0.256) * (1.0 - initial_content_noise_coeff)
+            noise = np.random.normal(size=overall_shape, scale=np.std(content) * 0.1)
+            initial = (initial) * initial_content_noise_coeff + (tf.random_normal(overall_shape) * 0.256) * (1.0 - initial_content_noise_coeff)
         image = tf.Variable(initial)
         net = vggnet.preloaded_network(vgg_network_weights, image, pooling)
 
@@ -119,21 +116,21 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
                 features = tf.reshape(layer, (-1, number))
                 gram = tf.matmul(tf.transpose(features), features) / size
                 style_gram = style_features[i][style_layer]
-                style_losses.append(style_layers_weights[style_layer] * 2 * tf.nn.l2_loss(gram - style_gram) / style_gram.size)
+                all_style_losses.append(weights_of_style_layers[style_layer] * 2 * tf.nn.l2_loss(gram - style_gram) / style_gram.size)
             style_loss += style_weight * style_blend_weights[i] * reduce(tf.add, all_style_losses)
 
         # denoising the total variation
 
         total_variation_y_size = _calc_tensor_size(image[:,1:,:,:])
         total_variation_x_size = _calc_tensor_size(image[:,:,1:,:])
-        total_variation_loss = total_variation_weight * 2 * ((tf.nn.l2_loss(image[:,1:,:,:] - image[:,:shape[1]-1,:,:]) / total_variation_y_size) +
-                (tf.nn.l2_loss(image[:,:,1:,:] - image[:,:,:shape[2]-1,:]) / total_variation_x_size))
+        total_variation_loss = total_variation_weight * 2 * ((tf.nn.l2_loss(image[:,1:,:,:] - image[:,:overall_shape[1]-1,:,:]) / total_variation_y_size) +
+                (tf.nn.l2_loss(image[:,:,1:,:] - image[:,:,:overall_shape[2]-1,:]) / total_variation_x_size))
 
         overall_loss = content_loss + style_loss + total_variation_loss
 
         # Optimizer setup
 
-        training_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(loss)
+        training_step = tf.train.AdamOptimizer(learning_rate, beta1, beta2, epsilon).minimize(overall_loss)
 
         def progress_statistics():
             stderr.write('content loss: %g\n' % content_loss.eval())
@@ -162,35 +159,35 @@ def style_transfer(neural_net, content, styles, style_layer_weight_exponent, poo
                     if present_loss < best_loss:
                         best_loss = present_loss
                         best = image.eval()
-                    output_image = vggnet.retrieve_original(best.reshape(shape[1:]), vgg_network_mean_pixel)
+                    output_image = vggnet.retrieve_original(best.reshape(overall_shape[1:]), vgg_network_mean_pixel)
 
                     if preserve_colors and preserve_colors == True:
                         original_image = np.clip(content, 0, 255)
                         styled_image = np.clip(output_image, 0, 255)
 
-                    # Luminosity transfer steps
+                        # Luminosity transfer steps
 
-                    # Rec.601 luma (0.299, 0.587, 0.114) conversion of stylized RGB to stylized grayscale
-                    styled_grayscale = rgb2grayscale(styled_image)
-                    styled_grayscale_rgb = grayscale2rgb(styled_grayscale)
+                        # Rec.601 luma (0.299, 0.587, 0.114) conversion of stylized RGB to stylized grayscale
+                        styled_grayscale = rgb2grayscale(styled_image)
+                        styled_grayscale_rgb = grayscale2rgb(styled_grayscale)
 
-                    # Stylized grayscale to YUV (YCbCr) conversion
-                    styled_grayscale_yuv = np.array(Image.fromarray(styled_grayscale_rgb.astype(np.uint8)).convert('YCbCr'))
+                        # Stylized grayscale to YUV (YCbCr) conversion
+                        styled_grayscale_yuv = np.array(Image.fromarray(styled_grayscale_rgb.astype(np.uint8)).convert('YCbCr'))
 
-                    # Original image to YUV (YCbCr) conversion
-                    original_yuv = np.array(Image.fromarray(original_image.astype(np.uint8)).convert('YCbCr'))
+                        # Original image to YUV (YCbCr) conversion
+                        original_yuv = np.array(Image.fromarray(original_image.astype(np.uint8)).convert('YCbCr'))
 
-                    # Recombine (stylizedYUV.Y, originalYUV.U, originalYUV.V)
-                    w, h, _ = original_image.shape
-                    combined_yuv = np.empty((w, h, 3), dtype=np.uint8)
-                    combined_yuv[..., 0] = styled_grayscale_yuv[..., 0]
-                    combined_yuv[..., 1] = original_yuv[..., 1]
-                    combined_yuv[..., 2] = original_yuv[..., 2]
+                        # Recombine (stylizedYUV.Y, originalYUV.U, originalYUV.V)
+                        w, h, _ = original_image.shape
+                        combined_yuv = np.empty((w, h, 3), dtype=np.uint8)
+                        combined_yuv[..., 0] = styled_grayscale_yuv[..., 0]
+                        combined_yuv[..., 1] = original_yuv[..., 1]
+                        combined_yuv[..., 2] = original_yuv[..., 2]
 
-                    # Recombined YUV image back to RGB
-                    output_image = np.array(Image.fromarray(combined_yuv, 'YCbCr').convert('RGB'))
+                        # Recombined YUV image back to RGB
+                        output_image = np.array(Image.fromarray(combined_yuv, 'YCbCr').convert('RGB'))
 
-                yield ((None if last_step else i), output_image)
+                    yield ((None if previous_training_step else i), output_image)
 
 
 
